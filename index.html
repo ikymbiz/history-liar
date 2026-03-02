@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>History Liar 2.5 - 時空の円卓審問</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;700&family=Noto+Serif+JP:wght@400;700&family=JetBrains+Mono:wght@300&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --chat-bg: #0f0f0f;
+            --user-bubble: #d4af37;
+            --npc-bubble: #262626;
+            --accent: #e63946;
+        }
+        body {
+            font-family: 'Shippori Mincho', serif;
+            background-color: #000;
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            overflow: hidden;
+            color: #e0e0e0;
+        }
+        #app {
+            width: 100%;
+            max-width: 500px;
+            background: var(--chat-bg);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            box-shadow: 0 0 80px rgba(0,0,0,1);
+            border-left: 1px solid #333;
+            border-right: 1px solid #333;
+        }
+        
+        /* Messages Rendering */
+        .msg-container {
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 20px;
+            padding: 0 16px;
+            animation: slideIn 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+        }
+        @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+        
+        .npc-msg { align-items: flex-start; }
+        .user-msg { align-items: flex-end; }
+
+        .speaker-name {
+            font-size: 0.7rem;
+            color: #888;
+            margin-bottom: 4px;
+            margin-left: 56px;
+            font-weight: bold;
+            letter-spacing: 0.1em;
+        }
+        .user-msg .speaker-name { margin-left: 0; margin-right: 12px; color: var(--user-bubble); }
+
+        .bubble-wrapper {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            max-width: 85%;
+        }
+        .user-msg .bubble-wrapper { flex-direction: row-reverse; }
+
+        .avatar {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: #1a1a1a;
+            flex-shrink: 0;
+            border: 2px solid #333;
+            transition: all 0.3s ease;
+            object-fit: cover;
+        }
+        .active-speaker .avatar {
+            border-color: var(--user-bubble);
+            box-shadow: 0 0 15px rgba(212, 175, 55, 0.4);
+            transform: scale(1.1);
+        }
+
+        .bubble {
+            position: relative;
+            padding: 12px 16px;
+            border-radius: 18px;
+            font-size: 0.9rem;
+            line-height: 1.6;
+            word-wrap: break-word;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+        .npc-bubble {
+            background: var(--npc-bubble);
+            color: #fff;
+            border-top-left-radius: 2px;
+            border: 1px solid #3d3d3d;
+        }
+        .user-bubble {
+            background: var(--user-bubble);
+            color: #000;
+            border-top-right-radius: 2px;
+            font-weight: bold;
+        }
+        
+        /* The "WAIT" Pulse Button */
+        #wait-btn {
+            position: absolute;
+            right: 20px;
+            bottom: 160px;
+            width: 80px;
+            height: 80px;
+            background: var(--accent);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 10px 30px rgba(230, 57, 70, 0.4);
+            cursor: pointer;
+            z-index: 100;
+            border: 4px solid #fff;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        #wait-btn:hover { transform: scale(1.1); }
+        #wait-btn:active { transform: scale(0.9); }
+        #wait-btn.paused { background: #555; animation: none; opacity: 0.8; }
+        .pulse { animation: pulseAnim 2s infinite; }
+        @keyframes pulseAnim { 0% { box-shadow: 0 0 0 0 rgba(230, 57, 70, 0.7); } 70% { box-shadow: 0 0 0 20px rgba(230, 57, 70, 0); } 100% { box-shadow: 0 0 0 0 rgba(230, 57, 70, 0); } }
+
+        /* Typing Dot Anim */
+        .typing-indicator { display: flex; gap: 4px; padding: 12px 18px; background: #222; border-radius: 20px; width: fit-content; margin-left: 70px; margin-bottom: 20px; border: 1px solid #333; }
+        .dot { width: 6px; height: 6px; background: #666; border-radius: 50%; animation: bounce 1.4s infinite; }
+        .dot:nth-child(2) { animation-delay: 0.2s; }
+        .dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+
+        #chat-log::-webkit-scrollbar { width: 4px; }
+        #chat-log::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+        
+        .history-bg {
+            position: absolute;
+            inset: 0;
+            background-image: url('https://www.transparenttextures.com/patterns/dark-matter.png');
+            opacity: 0.2;
+            pointer-events: none;
+        }
+
+        .system-msg {
+            align-self: center;
+            background: rgba(212, 175, 55, 0.1);
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            color: var(--user-bubble);
+            margin: 20px 0;
+            border: 1px solid rgba(212, 175, 55, 0.2);
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+        }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="app">
+        <div class="history-bg"></div>
+
+        <!-- Start Screen -->
+        <div id="start-screen" class="absolute inset-0 z-[200] bg-black flex flex-col items-center justify-center p-10 text-center">
+            <div class="mb-8 relative">
+                <div class="absolute -inset-4 bg-yellow-500/20 blur-2xl rounded-full animate-pulse"></div>
+                <i data-lucide="scroll-text" class="w-24 h-24 text-yellow-600 relative"></i>
+            </div>
+            <h1 class="text-4xl font-black mb-2 tracking-tighter italic text-white">History Liar <span class="text-yellow-600">2.5</span></h1>
+            <p class="text-[10px] text-stone-500 mb-12 tracking-[0.5em] uppercase">Temporal Anomaly Investigation</p>
+            
+            <div class="w-full max-w-xs mb-8">
+                <input type="password" id="api-key-input" class="w-full p-4 bg-stone-900 border border-stone-800 rounded-2xl text-center outline-none focus:border-yellow-600 transition-all text-white font-mono text-sm" placeholder="Gemini API Key (AIza...)">
+                <p id="key-error" class="hidden text-red-500 text-[10px] mt-3 bg-red-500/10 p-2 rounded-lg border border-red-500/20">Invalid API Key.</p>
+            </div>
+
+            <button onclick="startGame('bakumatsu')" class="w-full max-w-xs p-5 bg-white text-black font-black hover:bg-yellow-600 hover:text-white transition-all rounded-2xl shadow-2xl flex items-center justify-between group">
+                <span>幕末：薩長同盟の密談</span>
+                <i data-lucide="play" class="w-5 h-5 group-hover:translate-x-1 transition-transform"></i>
+            </button>
+            <p class="mt-8 text-[9px] text-stone-600">キーはブラウザにのみ保存されます。</p>
+        </div>
+
+        <!-- Header -->
+        <div id="game-header" class="hidden relative z-40 bg-black/90 backdrop-blur-md border-b border-white/10 p-4">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="w-2 h-2 bg-red-600 rounded-full animate-ping"></span>
+                        <span id="scenario-era" class="text-[9px] font-bold text-stone-500 tracking-widest uppercase">KYOTO 1866</span>
+                    </div>
+                    <h2 id="scenario-title" class="text-sm font-bold text-white">---</h2>
+                </div>
+                <button onclick="location.reload()" class="p-2 text-stone-500 hover:text-white"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
+            </div>
+            <div id="participant-bar" class="flex gap-3 overflow-x-auto no-scrollbar pb-1">
+                <!-- NPCs injected here -->
+            </div>
+        </div>
+
+        <!-- Chat Log -->
+        <div id="chat-log" class="hidden flex-1 overflow-y-auto py-8 flex flex-col scroll-smooth relative z-10">
+            <!-- Messages injected here -->
+        </div>
+
+        <!-- Typing -->
+        <div id="typing-container" class="hidden z-20">
+            <div class="typing-indicator">
+                <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+            </div>
+        </div>
+
+        <!-- Interruption Button -->
+        <div id="wait-btn" class="hidden pulse" onclick="handleWait()">
+            <span class="text-[10px] font-bold uppercase tracking-tighter">Wait!</span>
+            <span class="text-sm font-black">待った!</span>
+        </div>
+
+        <!-- Input Area -->
+        <div id="input-area" class="hidden bg-stone-900/95 backdrop-blur-2xl p-4 border-t border-white/10 flex flex-col gap-3 z-50">
+            <div id="lock-notice" class="text-[9px] text-center text-yellow-600 font-bold uppercase tracking-widest hidden">調査官の介入フェーズ</div>
+            <div class="flex items-center gap-2 bg-black/50 p-1.5 rounded-2xl border border-white/10 focus-within:border-yellow-600 transition-all">
+                <input type="text" id="user-input" class="flex-1 p-2.5 bg-transparent outline-none text-sm px-4 text-white" placeholder="証言の矛盾を指摘..." disabled>
+                <button id="send-btn" onclick="sendUserMessage()" class="p-3 bg-stone-800 text-stone-600 rounded-xl transition-all" disabled>
+                    <i data-lucide="send" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="flex gap-2">
+                <button id="resume-btn" onclick="resumeAiTurn()" class="flex-[2] py-4 bg-stone-800 text-stone-500 text-[10px] font-black rounded-xl cursor-not-allowed uppercase tracking-widest flex items-center justify-center gap-2" disabled>
+                    <i data-lucide="play-circle" class="w-4 h-4"></i> 議論再開
+                </button>
+                <button id="vote-btn" onclick="openVoteModal()" class="flex-1 py-4 bg-red-700 text-white text-[10px] font-black rounded-xl hover:bg-red-600 transition-colors uppercase tracking-widest shadow-lg">
+                    告発
+                </button>
+            </div>
+        </div>
+
+        <!-- Vote Modal -->
+        <div id="vote-modal" class="fixed inset-0 bg-black/95 z-[300] hidden flex items-center justify-center p-8 backdrop-blur-md">
+            <div class="bg-stone-900 border border-white/10 rounded-[2.5rem] w-full max-w-sm p-8 shadow-2xl">
+                <div class="text-center mb-8">
+                    <div class="inline-block p-4 bg-red-600/10 rounded-full mb-4">
+                        <i data-lucide="gavel" class="w-10 h-10 text-red-600"></i>
+                    </div>
+                    <h3 class="font-black text-2xl text-white">真実の審判</h3>
+                    <p class="text-[10px] text-stone-500 uppercase tracking-[0.3em] mt-2">Who is the Liar?</p>
+                </div>
+                <div id="vote-list" class="space-y-3 mb-10"></div>
+                <div class="flex flex-col gap-3">
+                    <button id="execute-vote-btn" onclick="executeVote()" disabled class="w-full py-5 bg-red-700 text-white font-black rounded-2xl opacity-30 shadow-xl transition-all uppercase tracking-widest text-xs">告発を実行</button>
+                    <button onclick="closeVoteModal()" class="w-full py-3 text-stone-500 font-bold text-[10px] uppercase tracking-widest">議論に戻る</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Result Screen -->
+        <div id="result-screen" class="hidden absolute inset-0 z-[400] bg-white flex flex-col items-center justify-center p-10 text-center text-black">
+            <div id="result-icon" class="mb-8 scale-[2.5]"></div>
+            <h2 id="result-title" class="text-6xl font-black mb-4 italic tracking-tighter"></h2>
+            <p id="result-desc" class="text-sm text-stone-600 mb-10 leading-relaxed font-medium"></p>
+            <div class="w-full p-6 bg-stone-100 rounded-3xl mb-12 text-left border border-stone-200">
+                <div class="text-[10px] font-black text-red-600 mb-2 tracking-widest uppercase italic">Archive: 正史の記録</div>
+                <span id="result-fact" class="text-xs leading-relaxed text-stone-800 font-bold"></span>
+            </div>
+            <button onclick="location.reload()" class="w-full py-5 bg-black text-white font-black rounded-2xl shadow-2xl active:scale-95 transition-transform uppercase tracking-[0.4em] text-[10px]">Return to Present</button>
+        </div>
+    </div>
+
+    <script>
+        const scenarios = {
+            bakumatsu: {
+                title: "薩長同盟の密談",
+                era: "KYOTO 1866",
+                characters: [
+                    { id: 0, name: "坂本 龍馬", role: "仲介者", icon: "https://api.dicebear.com/7.x/avataaars/svg?seed=ryoma&eyebrows=angry" },
+                    { id: 1, name: "西郷 隆盛", role: "薩摩藩代表", icon: "https://api.dicebear.com/7.x/avataaars/svg?seed=saigo" },
+                    { id: 2, name: "桂 小五郎", role: "長州藩代表", icon: "https://api.dicebear.com/7.x/avataaars/svg?seed=katsura" }
+                ],
+                liarId: 0,
+                liarSecret: "龍馬は『薩長同盟が成立した場所は、伏見の寺田屋である』と嘘をつきます。しかし事実は『京都の小松帯刀邸』です。",
+                explanation: "薩長同盟は1866年に京都の小松帯刀邸で成立しました。龍馬は後に寺田屋で襲撃されますが、場所を混同したか、何らかの理由で偽証をしています。"
+            }
+        };
+
+        let activeScenario = null;
+        let chatHistory = [];
+        let isProcessing = false;
+        let isPaused = false;
+        let selectedVoteId = null;
+        let loopTimer = null;
+
+        lucide.createIcons();
+
+        const apiKeyInput = document.getElementById('api-key-input');
+        apiKeyInput.value = localStorage.getItem('history_liar_gemini_key') || '';
+
+        async function startGame(key) {
+            const apiKey = apiKeyInput.value.trim();
+            if (!apiKey) return;
+            localStorage.setItem('history_liar_gemini_key', apiKey);
+            activeScenario = scenarios[key];
+
+            // Transition UI
+            document.getElementById('start-screen').classList.add('hidden');
+            document.getElementById('game-header').classList.remove('hidden');
+            document.getElementById('chat-log').classList.remove('hidden');
+            document.getElementById('input-area').classList.remove('hidden');
+            document.getElementById('wait-btn').classList.remove('hidden');
+
+            document.getElementById('scenario-title').innerText = activeScenario.title;
+            document.getElementById('scenario-era').innerText = activeScenario.era;
+
+            // Setup Participants
+            const bar = document.getElementById('participant-bar');
+            bar.innerHTML = '';
+            activeScenario.characters.forEach(c => {
+                const div = document.createElement('div');
+                div.id = `part-${c.id}`;
+                div.className = "flex-shrink-0 flex items-center gap-3 bg-stone-900 pr-4 rounded-xl border border-white/5 opacity-40 transition-all duration-500";
+                div.innerHTML = `
+                    <img src="${c.icon}" class="avatar">
+                    <div class="flex flex-col">
+                        <span class="text-[7px] font-black text-stone-500 uppercase">${c.role}</span>
+                        <span class="text-[10px] font-bold text-white whitespace-nowrap">${c.name}</span>
+                    </div>
+                `;
+                bar.appendChild(div);
+            });
+
+            // Initial Prompt
+            const systemPrompt = `
+あなたは歴史推理ゲームのGMです。
+シナリオ: ${activeScenario.title}
+舞台: ${activeScenario.era}
+登場人物: ${activeScenario.characters.map(c => `${c.name}(${c.role})`).join(', ')}
+
+[ルール]
+- 嘘つき(Liar)は「${activeScenario.characters[activeScenario.liarId].name}」です。
+- 嘘つきは必ず次の偽情報を事実として主張してください: 「${activeScenario.liarSecret}」
+- 他の者は史実に基づき、嘘つきの矛盾を突くような議論を展開してください。
+- 各キャラクターは個性的で、互いに疑い、時には問いかけてください。
+
+[出力形式]
+必ず以下のJSON形式のみで返してください。
+{"speaker": "名前", "target": "対象者名", "text": "メッセージ内容(100字以内)"}
+            `;
+
+            chatHistory = [{ role: "user", parts: [{ text: systemPrompt }] }];
+            appendSystemMessage("歴史の歪みを検知。調査を開始してください。");
+            
+            // Start Loop
+            runLoop();
+        }
+
+        async function runLoop() {
+            if (isPaused || isProcessing) return;
+            await nextAiTurn();
+            loopTimer = setTimeout(runLoop, 3500 + Math.random() * 2000);
+        }
+
+        async function nextAiTurn() {
+            setAiTyping(true);
+            try {
+                const apiKey = localStorage.getItem('history_liar_gemini_key');
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: chatHistory })
+                });
+
+                const data = await response.json();
+                const rawText = data.candidates[0].content.parts[0].text;
+                
+                // Robust JSON extraction
+                const match = rawText.match(/\{.*\}/s);
+                if (match) {
+                    const msgObj = JSON.parse(match[0]);
+                    appendMessage(msgObj.speaker, msgObj.text, false, msgObj.target);
+                    chatHistory.push({ role: "model", parts: [{ text: JSON.stringify(msgObj) }] });
+                }
+            } catch (e) {
+                console.error("AI Turn Error:", e);
+            } finally {
+                setAiTyping(false);
+            }
+        }
+
+        function appendMessage(speaker, text, isUser, target = null) {
+            const log = document.getElementById('chat-log');
+            const container = document.createElement('div');
+            container.className = `msg-container ${isUser ? 'user-msg' : 'npc-msg'}`;
+            
+            const char = activeScenario.characters.find(c => c.name === speaker);
+            const icon = isUser ? "https://api.dicebear.com/7.x/bottts/svg?seed=investigator" : (char ? char.icon : "");
+
+            // Highlight Avatar
+            if (!isUser && char) {
+                activeScenario.characters.forEach(c => document.getElementById(`part-${c.id}`).classList.remove('active-speaker', 'opacity-100'));
+                const part = document.getElementById(`part-${char.id}`);
+                part.classList.add('active-speaker', 'opacity-100');
+            }
+
+            container.innerHTML = `
+                <div class="speaker-name">${speaker}${target && target !== '全員' ? ` ➔ ${target}` : ''}</div>
+                <div class="bubble-wrapper">
+                    <img src="${icon}" class="avatar">
+                    <div class="bubble ${isUser ? 'user-bubble' : 'npc-bubble'}">
+                        ${text}
+                    </div>
+                </div>
+            `;
+            
+            log.appendChild(container);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function appendSystemMessage(text) {
+            const log = document.getElementById('chat-log');
+            const div = document.createElement('div');
+            div.className = "system-msg";
+            div.innerText = text;
+            log.appendChild(div);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function setAiTyping(show) {
+            document.getElementById('typing-container').classList.toggle('hidden', !show);
+            isProcessing = show;
+        }
+
+        function handleWait() {
+            isPaused = true;
+            if (loopTimer) clearTimeout(loopTimer);
+
+            const btn = document.getElementById('wait-btn');
+            btn.classList.add('paused');
+            btn.classList.remove('pulse');
+            btn.innerHTML = '<span class="text-[10px] font-bold">TALK</span><span class="text-sm font-black">発言する</span>';
+            
+            // Unlock Input
+            document.getElementById('user-input').disabled = false;
+            document.getElementById('user-input').focus();
+            document.getElementById('send-btn').disabled = false;
+            document.getElementById('send-btn').classList.remove('text-stone-600');
+            document.getElementById('send-btn').classList.add('text-yellow-600');
+            document.getElementById('resume-btn').disabled = false;
+            document.getElementById('resume-btn').classList.remove('text-stone-500');
+            document.getElementById('resume-btn').classList.add('text-white', 'bg-stone-700');
+            document.getElementById('lock-notice').classList.remove('hidden');
+            
+            appendSystemMessage("調査官が介入。証言の矛盾を突き、議論を誘導せよ。");
+        }
+
+        function resumeAiTurn() {
+            isPaused = false;
+            const btn = document.getElementById('wait-btn');
+            btn.classList.remove('paused');
+            btn.classList.add('pulse');
+            btn.innerHTML = '<span class="text-[10px] font-bold uppercase tracking-tighter">Wait!</span><span class="text-sm font-black">待った!</span>';
+            
+            // Lock Input
+            document.getElementById('user-input').disabled = true;
+            document.getElementById('send-btn').disabled = true;
+            document.getElementById('send-btn').classList.add('text-stone-600');
+            document.getElementById('resume-btn').disabled = true;
+            document.getElementById('resume-btn').classList.add('text-stone-500');
+            document.getElementById('resume-btn').classList.remove('text-white', 'bg-stone-700');
+            document.getElementById('lock-notice').classList.add('hidden');
+
+            runLoop();
+        }
+
+        async function sendUserMessage() {
+            const input = document.getElementById('user-input');
+            const text = input.value.trim();
+            if (!text) return;
+
+            input.value = '';
+            appendMessage("時空調査官", text, true);
+            chatHistory.push({ role: "user", parts: [{ text: `[時空調査官の介入]: 「${text}」 この指摘に対し、キャラクターたちは反応し、議論を続けてください。` }] });
+            
+            // Trigger reaction immediately
+            resumeAiTurn();
+        }
+
+        function openVoteModal() {
+            isPaused = true;
+            const modal = document.getElementById('vote-modal');
+            const list = document.getElementById('vote-list');
+            modal.classList.remove('hidden');
+            list.innerHTML = '';
+
+            activeScenario.characters.forEach(c => {
+                const btn = document.createElement('button');
+                btn.className = "w-full p-4 rounded-2xl bg-stone-800 border border-white/5 flex items-center justify-between hover:bg-stone-700 transition-all group";
+                btn.onclick = () => selectCandidate(c.id, btn);
+                btn.innerHTML = `
+                    <div class="flex items-center gap-4">
+                        <img src="${c.icon}" class="w-10 h-10 rounded-full border border-stone-600">
+                        <div class="text-left">
+                            <div class="text-[8px] text-stone-500 font-bold uppercase">${c.role}</div>
+                            <div class="text-sm font-bold text-white">${c.name}</div>
+                        </div>
+                    </div>
+                    <div class="w-6 h-6 rounded-full border-2 border-stone-600 group-hover:border-red-600 flex items-center justify-center">
+                        <div class="w-3 h-3 rounded-full bg-red-600 opacity-0 check-dot"></div>
+                    </div>
+                `;
+                list.appendChild(btn);
+            });
+        }
+
+        function selectCandidate(id, el) {
+            selectedVoteId = id;
+            document.querySelectorAll('.check-dot').forEach(d => d.classList.add('opacity-0'));
+            el.querySelector('.check-dot').classList.remove('opacity-0');
+            document.getElementById('execute-vote-btn').disabled = false;
+            document.getElementById('execute-vote-btn').classList.remove('opacity-30');
+        }
+
+        function closeVoteModal() {
+            document.getElementById('vote-modal').classList.add('hidden');
+            isPaused = false;
+            runLoop();
+        }
+
+        function executeVote() {
+            const isCorrect = selectedVoteId === activeScenario.liarId;
+            const result = document.getElementById('result-screen');
+            
+            document.getElementById('vote-modal').classList.add('hidden');
+            result.classList.remove('hidden');
+
+            const iconEl = document.getElementById('result-icon');
+            const titleEl = document.getElementById('result-title');
+            const descEl = document.getElementById('result-desc');
+            const factEl = document.getElementById('result-fact');
+
+            if (isCorrect) {
+                iconEl.innerHTML = '<i data-lucide="shield-check" class="w-20 h-20 text-green-600"></i>';
+                titleEl.innerText = "SUCCESS";
+                titleEl.className = "text-6xl font-black mb-4 italic text-green-600";
+                descEl.innerText = `${activeScenario.characters[selectedVoteId].name}の偽証を暴きました。歴史の修正に成功。`;
+            } else {
+                iconEl.innerHTML = '<i data-lucide="shield-alert" class="w-20 h-20 text-red-600"></i>';
+                titleEl.innerText = "FAILURE";
+                titleEl.className = "text-6xl font-black mb-4 italic text-red-600";
+                descEl.innerText = `告発に失敗しました。${activeScenario.characters[selectedVoteId].name}は無実です。歴史は歪められました。`;
+            }
+            
+            factEl.innerText = activeScenario.explanation;
+            lucide.createIcons();
+        }
+
+        // Enter Key Listener
+        document.getElementById('user-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !isProcessing && !document.getElementById('user-input').disabled) {
+                sendUserMessage();
+            }
+        });
+    </script>
+</body>
+</html>
